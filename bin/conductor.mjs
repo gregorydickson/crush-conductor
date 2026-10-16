@@ -8,7 +8,7 @@ import { getAdapter, listAdapters } from "../lib/adapters/registry.mjs";
 import { superviseJob, releaseLock } from "../lib/supervise.mjs";
 import {
   assertJobId, createJob, envelope, dataRoot, getLastSession, isTerminal,
-  listJobs, newJobId, readJob, recoverIfStale, requestCancel, resolveJobId, updateJob,
+  listJobs, newJobId, readJob, recoverIfStale, requestCancel, resolveJobId, updateJob, withLock,
 } from "../lib/jobs.mjs";
 import { probeProcess, runCommand, terminateProcessTree } from "../lib/proc.mjs";
 
@@ -123,8 +123,6 @@ async function cmdTask(harness, flags, positional) {
   }
   if (flags.name) {
     assertJobId(flags.name, "--name value");
-    const clash = listJobs({ harness }).find(job => job.name === flags.name && !isTerminal(job));
-    if (clash) throw new Error(`--name ${flags.name} is already bound to ${clash.jobId} (${clash.status}); status/result/cancel by that name would reach the wrong job.`);
   }
   const timeoutSec = flags.timeoutSec ? numericFlag(flags.timeoutSec, "--timeout") : 3600;
   const budgetUsd = flags.budgetUsd ? numericFlag(flags.budgetUsd, "--budget") : null;
@@ -155,27 +153,35 @@ async function cmdTask(harness, flags, positional) {
     throw new Error(`--profile and --no-user-config are codex-only (got ${harness}).`);
   }
 
-  const job = createJob({
-    jobId: newJobId(harness),
-    harness,
-    prompt: promptText,
-    briefFile,
-    instructionsFile,
-    outputSchema,
-    model: flags.model ?? null,
-    effort: flags.effort ?? null,
-    write: Boolean(flags.write),
-    fullAuto: Boolean(flags.fullAuto),
-    budgetUsd,
-    name: flags.name ?? null,
-    lockCmd: flags.lockCmd ?? null,
-    unlockCmd: flags.unlockCmd ?? null,
-    profile: flags.profile ?? null,
-    noUserConfig: Boolean(flags.noUserConfig),
-    cwd,
-    timeoutSec,
-    resumeOf,
-    resumeSessionId: flags.resumeSessionId ?? null,
+  // Serialize creation so the --name clash check is atomic: two concurrent
+  // launches must never both bind the same card-slice name.
+  const job = withLock("job-create", () => {
+    if (flags.name) {
+      const clash = listJobs({ harness }).find(job => job.name === flags.name && !isTerminal(job));
+      if (clash) throw new Error(`--name ${flags.name} is already bound to ${clash.jobId} (${clash.status}); status/result/cancel by that name would reach the wrong job.`);
+    }
+    return createJob({
+      jobId: newJobId(harness),
+      harness,
+      prompt: promptText,
+      briefFile,
+      instructionsFile,
+      outputSchema,
+      model: flags.model ?? null,
+      effort: flags.effort ?? null,
+      write: Boolean(flags.write),
+      fullAuto: Boolean(flags.fullAuto),
+      budgetUsd,
+      name: flags.name ?? null,
+      lockCmd: flags.lockCmd ?? null,
+      unlockCmd: flags.unlockCmd ?? null,
+      profile: flags.profile ?? null,
+      noUserConfig: Boolean(flags.noUserConfig),
+      cwd,
+      timeoutSec,
+      resumeOf,
+      resumeSessionId: flags.resumeSessionId ?? null,
+    });
   });
 
   if (flags.background) {

@@ -161,8 +161,10 @@ test("a resume that mints a fresh thread id fails honestly", async () => {
   const forked = await waitForStatus(dataRoot, "codex", jsonOut(takeover).jobId, ["completed", "failed"], 20000);
   assert.equal(forked.status, "failed");
   assert.match(forked.error.message, /started a fresh thread \(forked-not-a-known-thread\) instead of continuing not-a-known-thread/);
+  assert.equal(forked.sessionId, null, "the impostor thread id is never recorded as resumable state");
   const candidate = jsonOut(conductor(dataRoot, ["codex", "resume-candidate", "--json"]));
   assert.equal(candidate.available, false, "the impostor thread never claims the session index");
+  assert.match(conductor(dataRoot, ["codex", "task", "--json", "--resume-job", forked.jobId, "x"]).stderr, /recorded no session ID/, "the failed takeover cannot be resumed by job id");
 });
 
 test("--resume-session conflicts and shape errors", () => {
