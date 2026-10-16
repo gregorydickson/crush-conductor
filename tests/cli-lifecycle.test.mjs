@@ -124,6 +124,37 @@ test("cross-harness resume is rejected with the harness named", () => {
   assert.match(refused.stderr, /it is a droid job, not claude/);
 });
 
+test("--resume-session takes over a thread launched by any tool", async () => {
+  const dataRoot = dataDir("takeover");
+  const launch = conductor(dataRoot, ["codex", "task", "--background", "--json", "--name", "loa-3-s1", "first turn"]);
+  const first = await waitForStatus(dataRoot, "codex", jsonOut(launch).jobId, ["completed", "failed"]);
+  assert.equal(first.status, "completed");
+  assert.equal(first.sessionId, "fake-codex-thread");
+
+  // Simulate a session recorded by ANOTHER tool (companion CLI, claude --bg):
+  // only the thread id is known to conductor, no job record exists.
+  const takeover = conductor(dataRoot, ["codex", "task", "--background", "--json", "--name", "loa-3-s1",
+    "--resume-session", "fake-codex-thread", "follow up"], { FAKE_CODEX_RESUME_SECRET: "1" });
+  assert.equal(takeover.status, 0, takeover.stderr);
+  const second = await waitForStatus(dataRoot, "codex", jsonOut(takeover).jobId, ["completed", "failed"], 20000);
+  assert.equal(second.status, "completed");
+  assert.equal(second.sessionId, "fake-codex-thread", "thread continuity preserved");
+  assert.equal(second.result, "MANGO", "the child really ran in resume mode");
+  assert.equal(second.resumedFrom, null, "no conductor job was resumed — this was an external thread");
+  const byName = jsonOut(conductor(dataRoot, ["codex", "result", "loa-3-s1", "--json"]));
+  assert.equal(byName.jobId, second.jobId, "the takeover now owns the card-slice name");
+
+  const candidate = jsonOut(conductor(dataRoot, ["codex", "resume-candidate", "--json"]));
+  assert.equal(candidate.sessionId, "fake-codex-thread", "takeover updated the session index for later --resume");
+});
+
+test("--resume-session conflicts and shape errors", () => {
+  const dataRoot = dataDir("takeover-err");
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "s1", "--resume", "x"]).stderr, /mutually exclusive/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "s1", "--fresh", "x"]).stderr, /--fresh conflicts/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "has space", "x"]).stderr, /no whitespace/);
+});
+
 test("cancel force-settles a SIGKILLed supervisor and releases the lock", async () => {
   const dataRoot = dataDir("force");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "conductor-force-"));

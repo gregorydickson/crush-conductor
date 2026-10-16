@@ -21,6 +21,7 @@ const HARNESS_FLAGS = {
       "--full-auto": { key: "fullAuto", type: "bool" },
       "--resume": { key: "resume", type: "bool" },
       "--resume-job": { key: "resumeJobId", type: "string" },
+      "--resume-session": { key: "resumeSession", type: "string" },
       "--fresh": { key: "fresh", type: "bool" },
       "--model": { key: "model", type: "string" },
       "--effort": { key: "effort", type: "string" },
@@ -50,7 +51,7 @@ const HARNESS_FLAGS = {
 function usage() {
   const harnesses = listAdapters().map(adapter => adapter.id).join("|");
   return `Usage:
-  conductor <${harnesses}> task [--background] [--write|--full-auto] [--resume|--resume-job <id|name>|--fresh]
+  conductor <${harnesses}> task [--background] [--write|--full-auto] [--resume|--resume-job <id|name>|--resume-session <sid>|--fresh]
                                 [--model <m>] [--effort <e>] [--cwd <dir>] [--timeout <secs>]
                                 [--brief <file>] [--instructions <file>] [--output-schema <file>]
                                 [--budget <usd>] [--name <name>] [--lock-cmd <cmd>] [--unlock-cmd <cmd>]
@@ -110,8 +111,15 @@ async function cmdTask(harness, flags, positional) {
   const outputSchemaFile = flags.outputSchemaFile ? existingFile(flags.outputSchemaFile, "--output-schema") : null;
   const outputSchema = outputSchemaFile ? readJsonFile(outputSchemaFile, "output schema") : null;
   if (flags.name) assertJobId(flags.name, "--name value");
-  if (flags.fresh && (flags.resume || flags.resumeJobId)) {
-    throw new Error("--fresh conflicts with --resume/--resume-job: pick one.");
+  if (flags.fresh && (flags.resume || flags.resumeJobId || flags.resumeSession)) {
+    throw new Error("--fresh conflicts with --resume/--resume-job/--resume-session: pick one.");
+  }
+  const resumeFlags = [flags.resume, flags.resumeJobId, flags.resumeSession].filter(Boolean).length;
+  if (resumeFlags > 1) {
+    throw new Error("--resume, --resume-job and --resume-session are mutually exclusive.");
+  }
+  if (flags.resumeSession != null && !/^\S+$/.test(flags.resumeSession)) {
+    throw new Error("--resume-session requires a session/thread id with no whitespace.");
   }
   const timeoutSec = flags.timeoutSec ? numericFlag(flags.timeoutSec, "--timeout") : 3600;
   const budgetUsd = flags.budgetUsd ? numericFlag(flags.budgetUsd, "--budget") : null;
@@ -121,7 +129,12 @@ async function cmdTask(harness, flags, positional) {
   }
 
   let resumeOf = null;
-  if (flags.resumeJobId) {
+  if (flags.resumeSession) {
+    // Mid-flight takeover: continue a harness thread launched by any tool
+    // (companion CLI, claude --bg, another operator session). The id is not
+    // validated against a conductor record — the harness itself rejects an
+    // unknown thread and the failure surfaces in the job envelope.
+  } else if (flags.resumeJobId) {
     const prior = readJob(resolveJobId(flags.resumeJobId, harness));
     if (prior.harness !== harness) throw new Error(`Cannot resume ${flags.resumeJobId}: it is a ${prior.harness} job, not ${harness}.`);
     if (!prior.sessionId) throw new Error(`Cannot resume ${prior.jobId}: it recorded no session ID.`);
@@ -160,6 +173,7 @@ async function cmdTask(harness, flags, positional) {
     cwd,
     timeoutSec,
     resumeOf,
+    resumeSession: flags.resumeSession ?? null,
   });
 
   if (flags.background) {

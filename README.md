@@ -23,7 +23,7 @@ conductor droid result --json
 
 ```
 conductor <droid|claude|codex> task [--background] [--write|--full-auto]
-                              [--resume | --resume-job <id|name> | --fresh]
+                              [--resume | --resume-job <id|name> | --resume-session <sid> | --fresh]
                               [--model <m>] [--effort <e>] [--cwd <dir>]
                               [--timeout <secs>] [--brief <file>]
                               [--instructions <file>] [--output-schema <file>]
@@ -44,6 +44,15 @@ reached `status == "completed"` (and `schemaValid != false`); a
 `task --background` launch exits 0 on a successful handoff (the job left
 `queued`) and 1 if the job already failed or was cancelled at handoff.
 `status`/`result` with no job id resolve the latest job for that harness.
+
+**Mid-flight takeover.** `--resume-session <sid>` continues a harness
+thread by its raw session/thread id, whatever launched it (the companion
+CLIs, `claude --bg`, another operator session). Read the id from the
+launching tool's record (a PM branch index stores it), confirm the source
+job is no longer running first, and give the takeover the full flag set
+(`--name`, `--cwd`, tiers, lock commands) — it is a fresh job record whose
+thread happens to predate conductor. A successful takeover updates the
+session index, so later `--resume` continues it normally.
 
 ## Envelope
 

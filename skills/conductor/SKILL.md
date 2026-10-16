@@ -18,7 +18,7 @@ install.sh linked it onto PATH). All read commands accept `--json`; always pass
 it and parse the envelope — never scrape human output.
 
 ```
-conductor <droid|claude|codex> task [--background] [--write|--full-auto] [--resume | --resume-job <id|name> | --fresh]
+conductor <droid|claude|codex> task [--background] [--write|--full-auto] [--resume | --resume-job <id|name> | --resume-session <sid> | --fresh]
                               [--model <m>] [--effort <e>] [--cwd <dir>]
                               [--timeout <secs>] [--brief <file>]
                               [--instructions <file>] [--output-schema <file>]
@@ -56,8 +56,10 @@ error, sessionId, usage, schemaValid, parsed, resumedFrom, durationMs`.
    relaying anything upward. An unverified worker claim is a rumour.
 6. **Abort**: `cancel <jobId> --json` when a worker went sideways.
 7. **Follow-ups**: `--resume` continues the harness's last good session (thread
-   memory retained); `--fresh` starts clean. Check `resume-candidate --json`
-   before choosing.
+   memory retained); `--fresh` starts clean; `--resume-session <sid>` takes
+   over a thread launched by any other tool mid-flight (confirm the source
+   job is stopped first — two writers on one thread corrupt it). Check
+   `resume-candidate --json` before choosing.
 
 ## Access and safety rules
 
