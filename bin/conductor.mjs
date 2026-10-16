@@ -265,8 +265,17 @@ async function cmdCancel(harness, id, flags) {
   }
   terminateProcessTree(job.childPid, { identity: job.childPidIdentity ?? null });
   terminateProcessTree(job.pid, { identity: job.pidIdentity ?? null });
-  if (job.unlockCmd) runCommand("/bin/sh", ["-c", job.unlockCmd], { cwd: job.cwd });
-  job = updateJob(jobId, { status: "cancelled", endedAt: new Date().toISOString(), error: { kind: "cancelled", message: "Cancelled; supervisor did not settle in time." } }, { ignoreTerminal: true });
+  let unlockWarnings = [];
+  if (job.unlockCmd) {
+    const unlocked = runCommand("/bin/sh", ["-c", job.unlockCmd], { cwd: job.cwd });
+    if (unlocked.status !== 0) unlockWarnings = [{ message: `Unlock command failed (${unlocked.status}): ${(unlocked.stderr || unlocked.stdout).slice(0, 300)}` }];
+  }
+  job = updateJob(jobId, {
+    status: "cancelled",
+    endedAt: new Date().toISOString(),
+    error: { kind: "cancelled", message: "Cancelled; supervisor did not settle in time." },
+    warnings: [...(job.warnings ?? []), ...unlockWarnings],
+  }, { ignoreTerminal: true });
   emit(envelope(job), flags.json);
   return job;
 }
