@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { droidAdapter, READ_ONLY_TOOLS } from "../lib/adapters/droid.mjs";
 import { claudeAdapter, CLAUDE_WRITE_TOOLS } from "../lib/adapters/claude.mjs";
+import { codexAdapter } from "../lib/adapters/codex.mjs";
 
 test("droid fresh read-only turn is fenced and jsonrpc", () => {
   const args = droidAdapter.buildExecArgs({ cwd: "/w", promptFile: "/p.txt" });
@@ -53,4 +54,38 @@ test("claude full-auto, model, effort, schema, budget, resume", () => {
   assert.deepEqual(JSON.parse(args[args.indexOf("--json-schema") + 1]), { type: "object" });
   assert.equal(args[args.indexOf("--max-budget-usd") + 1], "2");
   assert.equal(args[args.indexOf("--resume") + 1], "s1");
+});
+
+test("codex read-only maps to sandbox read-only", () => {
+  const args = codexAdapter.buildExecArgs({ cwd: "/w", lastMessageFile: "/o" });
+  assert.deepEqual(args, ["exec", "--json", "-C", "/w", "-s", "read-only", "-o", "/o", "-"]);
+});
+
+test("codex write maps to workspace-write with deterministic approvals", () => {
+  const args = codexAdapter.buildExecArgs({ cwd: "/w", write: true, model: "gpt-5.2-codex", effort: "high", lastMessageFile: "/o", outputSchemaFile: "/s" });
+  assert.equal(args[args.indexOf("-s") + 1], "workspace-write");
+  assert.deepEqual(args.slice(args.indexOf("-c"), args.indexOf("-c") + 2), ["-c", 'approval_policy="never"']);
+  assert.equal(args[args.indexOf("-m") + 1], "gpt-5.2-codex");
+  assert.equal(args[args.indexOf("-c", args.indexOf("-m")) + 1], 'model_reasoning_effort="high"');
+  assert.equal(args[args.indexOf("--output-schema") + 1], "/s");
+});
+
+test("codex full-auto bypasses sandbox and never fences tools", () => {
+  const args = codexAdapter.buildExecArgs({ cwd: "/w", fullAuto: true, lastMessageFile: "/o" });
+  assert.ok(args.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.ok(!args.includes("-s"));
+});
+
+test("codex resume routes through exec resume with the thread id", () => {
+  const args = codexAdapter.buildExecArgs({ cwd: "/w", resumeSessionId: "thread-9", lastMessageFile: "/o" });
+  assert.deepEqual(args.slice(0, 4), ["exec", "resume", "thread-9", "--json"]);
+  assert.ok(!args.includes("-C"), "resume has no -C flag");
+  assert.ok(!args.includes("-s"), "resume has no -s flag");
+  assert.equal(args[args.indexOf("-c") + 1], 'sandbox_mode="read-only"');
+});
+
+test("codex write resume expresses the sandbox as a config override", () => {
+  const args = codexAdapter.buildExecArgs({ cwd: "/w", resumeSessionId: "thread-9", write: true, lastMessageFile: "/o" });
+  assert.ok(args.includes('sandbox_mode="workspace-write"'));
+  assert.ok(args.includes('approval_policy="never"'));
 });

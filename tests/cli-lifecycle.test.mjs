@@ -48,7 +48,9 @@ test("background task lifecycle through the CLI", async () => {
   assert.equal(launch.status, 0, launch.stderr);
   const launched = jsonOut(launch);
   assert.equal(launched.harness, "droid");
-  assert.ok(["queued", "running"].includes(launched.status));
+  // Fast fakes can finish before the launch envelope is printed; any
+  // supervisor-owned state is a successful handoff.
+  assert.ok(["queued", "running", "completed"].includes(launched.status), `unexpected launch status ${launched.status}`);
 
   const done = await waitForStatus(dataRoot, "droid", launched.jobId, ["completed", "failed"]);
   assert.equal(done.status, "completed");

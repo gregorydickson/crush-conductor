@@ -21,7 +21,7 @@ if (process.env.CONDUCTOR_LIVE !== "1") {
     });
   }
 
-  for (const harness of ["claude", "droid"]) {
+  for (const harness of ["claude", "droid", "codex"]) {
     test(`${harness} live roundtrip`, async () => {
       const doctor = conductor([harness, "doctor", "--json"]);
       assert.equal(doctor.status, 0, `${harness} unavailable: ${doctor.stdout}${doctor.stderr}`);
@@ -40,6 +40,15 @@ if (process.env.CONDUCTOR_LIVE !== "1") {
     const second = JSON.parse(conductor(["claude", "task", "--json", "--resume", "What was the secret word? Reply with just the word."]).stdout);
     assert.equal(second.status, "completed");
     assert.match(second.result, /MANGO/i);
+    assert.equal(second.resumedFrom, first.jobId);
+  });
+
+  test("codex live resume remembers the thread", () => {
+    const first = JSON.parse(conductor(["codex", "task", "--json", "Remember the secret word: PAPAYA. Reply with just OK."]).stdout);
+    assert.equal(first.status, "completed");
+    const second = JSON.parse(conductor(["codex", "task", "--json", "--resume", "What was the secret word? Reply with just the word."]).stdout);
+    assert.equal(second.status, "completed");
+    assert.match(second.result, /PAPAYA/i);
     assert.equal(second.resumedFrom, first.jobId);
   });
 }

@@ -10,7 +10,7 @@ import {
   createJob, envelope, dataRoot, getLastSession,
   listJobs, newJobId, readJob, recoverIfStale, requestCancel, resolveJobId, updateJob,
 } from "../lib/jobs.mjs";
-import { pidAlive, processIdentity, terminateProcessTree } from "../lib/proc.mjs";
+import { processIdentity, terminateProcessTree } from "../lib/proc.mjs";
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const HARNESS_FLAGS = {
@@ -97,7 +97,7 @@ async function cmdTask(harness, flags, positional) {
     if (!prior.sessionId) throw new Error(`Cannot resume ${flags.resumeJobId}: it recorded no session ID.`);
     resumeOf = flags.resumeJobId;
   } else if (flags.resume) {
-    const last = getLastSession(harness);
+    const last = getLastSession(harness) ?? listJobs({ harness }).find(job => job.status === "completed" && job.sessionId);
     if (!last) throw new Error(`No resumable ${harness} session on record. Start fresh (omit --resume).`);
     resumeOf = last.jobId;
   }
@@ -130,7 +130,7 @@ async function cmdTask(harness, flags, positional) {
       detached: true, stdio: "ignore", cwd: job.cwd,
     });
     child.unref();
-    await waitFor(() => readJob(job.jobId).status === "running", 5000);
+    await waitFor(() => readJob(job.jobId).status !== "queued", 5000);
     emit(envelope(readJob(job.jobId)), flags.json);
     return { job: readJob(job.jobId), launched: true };
   }
@@ -184,8 +184,9 @@ async function cmdCancel(harness, id, flags) {
   if (alive) { try { process.kill(job.pid, "SIGTERM"); } catch { /* supervisor gone */ } }
   const settled = await waitFor(() => ["completed", "failed", "cancelled"].includes(readJob(jobId).status), 15000, 250);
   if (!settled) {
-    if (job.childPid && pidAlive(job.childPid)) terminateProcessTree(job.childPid);
-    if (job.pid && pidAlive(job.pid)) terminateProcessTree(job.pid);
+    // Termination attempts no-op on already-gone pids; identity checks guard the signals above.
+    terminateProcessTree(job.childPid);
+    terminateProcessTree(job.pid);
     job = updateJob(jobId, { status: "cancelled", endedAt: new Date().toISOString(), error: { kind: "cancelled", message: "Cancelled; supervisor did not settle in time." } });
   } else {
     job = readJob(jobId);
@@ -213,8 +214,12 @@ async function cmdDoctor(harness, flags) {
 }
 
 function cmdResumeCandidate(harness, flags) {
-  const last = getLastSession(harness);
-  emit({ harness, available: Boolean(last?.sessionId), ...last }, flags.json);
+  const indexed = getLastSession(harness);
+  const fallback = indexed ? null : listJobs({ harness }).find(job => job.status === "completed" && job.sessionId);
+  const last = indexed
+    ? { jobId: indexed.jobId, sessionId: indexed.sessionId }
+    : fallback ? { jobId: fallback.jobId, sessionId: fallback.sessionId } : null;
+  emit({ harness, available: Boolean(last), jobId: last?.jobId ?? null, sessionId: last?.sessionId ?? null }, flags.json);
 }
 
 function cmdList(flags) {
@@ -248,8 +253,10 @@ async function main() {
     if (command === "task") {
       const { flags, rest } = parseArgs(rawArgv.slice(2), mergedSpec);
       const { job, launched } = await cmdTask(harnessId, flags, rest);
+      // Launch exit reflects handoff, not outcome: a job that already reached
+      // a terminal state launched fine; the caller checks outcome separately.
       process.exitCode = launched
-        ? (job.status === "running" || job.status === "queued" ? 0 : 1)
+        ? (job.status !== "queued" ? 0 : 1)
         : (job.status === "completed" && job.schemaValid !== false ? 0 : 1);
       return;
     }

@@ -2,8 +2,8 @@
 
 Charm **Crush** as the master coordinator of a project's worth of work: a
 single job CLI that delegates work to external agent harnesses and manages
-those jobs durably on disk. Initial interfaces: **Droid** (Factory) and
-**Claude Code**; further harnesses slot in as adapters.
+those jobs durably on disk. Initial interfaces: **Droid** (Factory),
+**Claude Code**, and **Codex** (OpenAI); further harnesses slot in as adapters.
 
 Crush (or any caller) never babysits a worker interactively. Every delegation
 is a job: launch, poll, collect a verifiable envelope, cancel or resume. Job
@@ -22,17 +22,17 @@ conductor droid result --json
 ## CLI
 
 ```
-conductor <droid|claude> task [--background] [--write|--full-auto]
+conductor <droid|claude|codex> task [--background] [--write|--full-auto]
                               [--resume | --resume-job <id> | --fresh]
                               [--model <m>] [--effort <e>] [--cwd <dir>]
                               [--timeout <secs>] [--brief <file>]
                               [--instructions <file>] [--output-schema <file>]
                               [--budget <usd>] [--json] [prompt]
-conductor <droid|claude> status [job-id] [--wait] [--timeout <secs>] [--json]
-conductor <droid|claude> result [job-id] [--json]
-conductor <droid|claude> cancel [job-id] [--json]
-conductor <droid|claude> doctor [--json]
-conductor <droid|claude> resume-candidate [--json]
+conductor <droid|claude|codex> status [job-id] [--wait] [--timeout <secs>] [--json]
+conductor <droid|claude|codex> result [job-id] [--json]
+conductor <droid|claude|codex> cancel [job-id] [--json]
+conductor <droid|claude|codex> doctor [--json]
+conductor <droid|claude|codex> resume-candidate [--json]
 conductor list [--harness <id>] [--json]
 conductor __supervise <job-id>   (internal; detached job supervisor)
 ```
@@ -66,7 +66,8 @@ stdout; progress goes to the job's stream file, never stdout):
 
 With `--output-schema`, `parsed` holds the worker's validated JSON and
 `schemaValid` states whether it matched. Droid enforces the schema via prompt +
-one repair turn; Claude Code enforces it natively via `--json-schema`.
+one repair turn; Claude Code and Codex enforce it natively (`--json-schema` /
+`--output-schema`).
 
 State: `~/.local/share/crush-conductor/jobs/<job-id>/` (`job.json`,
 `stream.jsonl` progress trail, `cancel` marker). Override with
@@ -75,11 +76,11 @@ State: `~/.local/share/crush-conductor/jobs/<job-id>/` (`job.json`,
 
 ## Access tiers
 
-| Mode | droid | claude |
-| --- | --- | --- |
-| default (read-only) | `--only-tools Read,LS,Grep,Glob,Execute` | `dontAsk` + write tools disallowed |
-| `--write` | `--auto medium` | `acceptEdits` + edit/git tool allows |
-| `--full-auto` | `--skip-permissions-unsafe` | `bypassPermissions` |
+| Mode | droid | claude | codex |
+| --- | --- | --- | --- |
+| default (read-only) | `--only-tools Read,LS,Grep,Glob,Execute` | `dontAsk` + write tools disallowed | `-s read-only` |
+| `--write` | `--auto medium` | `acceptEdits` + edit/git tool allows | `-s workspace-write` + `approval_policy=never` |
+| `--full-auto` | `--skip-permissions-unsafe` | `bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` |
 
 ## Architecture
 
@@ -90,6 +91,7 @@ lib/supervise.mjs        one job to terminal state; writes the envelope
 lib/adapters/registry.mjs  harness registry
 lib/adapters/droid.mjs   droid exec transport (stream-jsonrpc fresh, stream-json resume)
 lib/adapters/claude.mjs  claude -p transport (stream-json, prompt via stdin)
+lib/adapters/codex.mjs   codex exec transport (JSONL events, prompt via stdin, resume subcommand)
 lib/schema.mjs           JSON Schema subset validator (type/required/properties/items/enum)
 lib/proc.mjs             process identity (PID-reuse safe), process-tree kill
 skills/conductor/        the Crush skill (installed to ~/.agents/skills)

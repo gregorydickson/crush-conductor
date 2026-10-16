@@ -1,14 +1,15 @@
 ---
 name: conductor
-description: Delegate work from Crush to external agent harnesses (Droid, Claude Code) as managed background jobs — task fan-out, status polling, result collection, cancellation, and session resume. Use whenever the plan calls for sending implementation, review, or investigation work to another agent CLI while Crush stays the master coordinator.
+description: Delegate work from Crush to external agent harnesses (Droid, Claude Code, Codex) as managed background jobs — task fan-out, status polling, result collection, cancellation, and session resume. Use whenever the plan calls for sending implementation, review, or investigation work to another agent CLI while Crush stays the master coordinator.
 user-invocable: true
 ---
 
 # Conductor — Crush delegates to other agent harnesses
 
-Crush is the master coordinator. Droid and Claude Code (and later harnesses) are
-worker backends driven through one uniform job CLI. Never babysit a worker
-interactively; every delegation is a job with a durable on-disk envelope.
+Crush is the master coordinator. Droid, Claude Code, and Codex (and later
+harnesses) are worker backends driven through one uniform job CLI. Never
+babysit a worker interactively; every delegation is a job with a durable
+on-disk envelope.
 
 ## The CLI
 
@@ -17,17 +18,16 @@ install.sh linked it onto PATH). All read commands accept `--json`; always pass
 it and parse the envelope — never scrape human output.
 
 ```
-conductor <droid|claude> task [--background] [--write|--full-auto]
-                              [--resume | --resume-job <id> | --fresh]
+conductor <droid|claude|codex> task [--background] [--write|--full-auto] [--resume | --resume-job <id> | --fresh]
                               [--model <m>] [--effort <e>] [--cwd <dir>]
                               [--timeout <secs>] [--brief <file>]
                               [--instructions <file>] [--output-schema <file>]
                               [--budget <usd>] [--json] [prompt]
-conductor <droid|claude> status [job-id] [--wait] [--timeout <secs>] [--json]
-conductor <droid|claude> result [job-id] [--json]
-conductor <droid|claude> cancel [job-id] [--json]
-conductor <droid|claude> doctor [--json]
-conductor <droid|claude> resume-candidate [--json]
+conductor <droid|claude|codex> status [job-id] [--wait] [--timeout <secs>] [--json]
+conductor <droid|claude|codex> result [job-id] [--json]
+conductor <droid|claude|codex> cancel [job-id] [--json]
+conductor <droid|claude|codex> doctor [--json]
+conductor <droid|claude|codex> resume-candidate [--json]
 conductor list [--harness <id>] [--json]
 ```
 
@@ -61,8 +61,9 @@ error, sessionId, usage, schemaValid, parsed, resumedFrom, durationMs`.
 ## Access and safety rules
 
 - Default runs are **read-only**. `--write` grants edit + git commands
-  (droid: `--auto medium`; claude: acceptEdits + git tool allows).
-  `--full-auto` lifts fences entirely — reserve for sandboxes/worktrees.
+  (droid: `--auto medium`; claude: acceptEdits + git tool allows;
+  codex: `-s workspace-write`). `--full-auto` lifts fences entirely —
+  reserve for sandboxes/worktrees.
 - Write jobs get their own **git worktree** (`--cwd`) and the worktree lock
   (`~/.claude/bin/agent-lock.sh <worktree>`) is held by Crush for the duration;
   release after the job settles. One repo per worker, one worker per worktree.
