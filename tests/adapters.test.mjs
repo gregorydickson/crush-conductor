@@ -58,7 +58,7 @@ test("claude full-auto, model, effort, schema, budget, resume", () => {
 
 test("codex read-only maps to sandbox read-only", () => {
   const args = codexAdapter.buildExecArgs({ cwd: "/w", lastMessageFile: "/o" });
-  assert.deepEqual(args, ["exec", "--json", "-C", "/w", "-s", "read-only", "-o", "/o", "-"]);
+  assert.deepEqual(args, ["exec", "--json", "-C", "/w", "--skip-git-repo-check", "-s", "read-only", "-o", "/o", "-"]);
 });
 
 test("codex write maps to workspace-write with deterministic approvals", () => {
@@ -79,6 +79,7 @@ test("codex full-auto bypasses sandbox and never fences tools", () => {
 test("codex resume routes through exec resume with the thread id", () => {
   const args = codexAdapter.buildExecArgs({ cwd: "/w", resumeSessionId: "thread-9", lastMessageFile: "/o" });
   assert.deepEqual(args.slice(0, 4), ["exec", "resume", "thread-9", "--json"]);
+  assert.ok(args.includes("--skip-git-repo-check"), "ad-hoc non-repo cwds are allowed; the sandbox is the boundary");
   assert.ok(!args.includes("-C"), "resume has no -C flag");
   assert.ok(!args.includes("-s"), "resume has no -s flag");
   assert.equal(args[args.indexOf("-c") + 1], 'sandbox_mode="read-only"');

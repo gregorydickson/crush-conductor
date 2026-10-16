@@ -97,6 +97,18 @@ for `--resume`.
 | `--write` | `--auto medium` | `acceptEdits` + edit/git tool allows | `-s workspace-write` + `approval_policy=never` |
 | `--full-auto` | `--skip-permissions-unsafe` | `bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` |
 
+**Verified capabilities (live evidence, 2026-10-16).** Each row was proven
+with real one-shot jobs through conductor: a blocked arm (write attempt
+under the read-only tier) and a contrast arm (the same request under the
+allowed tier).
+
+| Claim | Evidence (job ids) |
+| --- | --- |
+| Droid read-only fence binds in the fresh stream-jsonrpc shape: a write attempt fails the job loudly (`no_approver_available`), no file; `--write` creates it | `droid-mvberqlb-ldiz7v` blocked vs `droid-mvbes780-sxr93d` allowed |
+| Claude read-only removes the write tools from the session entirely ("no Write tool in this session") and `dontAsk` denies MCP tools before they reach the server; `--write` creates files | `claude-mvbespuh-jd8f56` blocked, `claude-mvbets77-w4a5bq` MCP denied vs `claude-mvbeswv7-1jajqn` allowed |
+| Codex `-s read-only` blocks writes; fresh and **resumed** write jobs honor `workspace-write` (no tier escape on `exec resume`) | `codex-mvbeun5k-raglth` blocked vs fresh+resume writes completing (resume job `codex-mvbevc8f-wpf21d`, thread continuity held) |
+| An unknown `--resume-session` id never silently continues: the continuity guard fails the job naming both thread ids | live pair in `tests/live.test.mjs`; impostor ids are never recorded |
+
 ## Architecture
 
 ```
