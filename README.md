@@ -39,9 +39,11 @@ conductor list [--harness <id>] [--json]
 conductor __supervise <job-id>   (internal; detached job supervisor)
 ```
 
-Exit codes: `task`/`result` exit 0 only when the job reached
-`status == "completed"` (and `schemaValid != false`). `status`/`result` with no
-job id resolve the latest job for that harness.
+Exit codes: a foreground `task` and `result` exit 0 only when the job
+reached `status == "completed"` (and `schemaValid != false`); a
+`task --background` launch exits 0 on a successful handoff (the job left
+`queued`) and 1 if the job already failed or was cancelled at handoff.
+`status`/`result` with no job id resolve the latest job for that harness.
 
 ## Envelope
 

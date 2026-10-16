@@ -229,7 +229,7 @@ async function cmdCancel(harness, id, flags) {
   requestCancel(jobId);
   const probe = job.pid ? probeProcess(job.pid) : { known: false, alive: false };
   const supervisorLive = probe.alive && (job.pidIdentity == null || probe.identity === job.pidIdentity);
-  const supervisorDead = probe.known && (!probe.alive || (job.pidIdentity != null && probe.identity !== job.pidIdentity));
+  const supervisorVerifiedDead = probe.known && (!probe.alive || (job.pidIdentity != null && probe.identity !== job.pidIdentity));
   if (supervisorLive) {
     try { process.kill(job.pid, "SIGTERM"); } catch { /* supervisor gone */ }
     const settled = await waitFor(() => isTerminal(readJob(jobId)), 15000, 250);
@@ -238,8 +238,7 @@ async function cmdCancel(harness, id, flags) {
       emit(envelope(job), flags.json);
       return job;
     }
-  }
-  if (!supervisorDead && !supervisorLive) {
+  } else if (!supervisorVerifiedDead) {
     // Probe unknown (transient ps failure): wait out the settle window rather
     // than acting on an unresolvable process state.
     const settled = await waitFor(() => isTerminal(readJob(jobId)), 15000, 250);
@@ -248,6 +247,21 @@ async function cmdCancel(harness, id, flags) {
       emit(envelope(job), flags.json);
       return job;
     }
+  }
+  // Everything below may only run against a FRESH snapshot whose supervisor
+  // is verified dead right now — never against pids read before the waits.
+  job = recoverIfStale(readJob(jobId));
+  if (isTerminal(job)) {
+    emit(envelope(job), flags.json);
+    return job;
+  }
+  const freshProbe = job.pid ? probeProcess(job.pid) : { known: false, alive: false };
+  const stillLive = freshProbe.alive && (job.pidIdentity == null || freshProbe.identity === job.pidIdentity);
+  if (stillLive || !freshProbe.known) {
+    console.error(`conductor: supervisor of ${jobId} is not verifiably dead; cancel marker left in place, not forcing.`);
+    process.exitCode = 1;
+    emit(envelope(job), flags.json);
+    return job;
   }
   terminateProcessTree(job.childPid, { identity: job.childPidIdentity ?? null });
   terminateProcessTree(job.pid, { identity: job.pidIdentity ?? null });
