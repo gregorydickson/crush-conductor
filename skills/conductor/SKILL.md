@@ -18,14 +18,15 @@ install.sh linked it onto PATH). All read commands accept `--json`; always pass
 it and parse the envelope — never scrape human output.
 
 ```
-conductor <droid|claude|codex> task [--background] [--write|--full-auto] [--resume | --resume-job <id> | --fresh]
+conductor <droid|claude|codex> task [--background] [--write|--full-auto] [--resume | --resume-job <id|name> | --fresh]
                               [--model <m>] [--effort <e>] [--cwd <dir>]
                               [--timeout <secs>] [--brief <file>]
                               [--instructions <file>] [--output-schema <file>]
-                              [--budget <usd>] [--json] [prompt]
-conductor <droid|claude|codex> status [job-id] [--wait] [--timeout <secs>] [--json]
-conductor <droid|claude|codex> result [job-id] [--json]
-conductor <droid|claude|codex> cancel [job-id] [--json]
+                              [--budget <usd>] [--name <name>] [--lock-cmd <cmd>] [--unlock-cmd <cmd>]
+                              [--profile <p>] [--no-user-config] [--json] [prompt]
+conductor <droid|claude|codex> status [job-id-or-name] [--wait] [--timeout <secs>] [--json]
+conductor <droid|claude|codex> result [job-id-or-name] [--json]
+conductor <droid|claude|codex> cancel [job-id-or-name] [--json]
 conductor <droid|claude|codex> doctor [--json]
 conductor <droid|claude|codex> resume-candidate [--json]
 conductor list [--harness <id>] [--json]
@@ -68,8 +69,13 @@ error, sessionId, usage, schemaValid, parsed, resumedFrom, durationMs`.
   (`~/.claude/bin/agent-lock.sh <worktree>`) is held by Crush for the duration;
   release after the job settles. One repo per worker, one worker per worktree.
 - Workers never push. Crush reviews, commits, and pushes.
-- Cross-harness resumes are rejected; `--resume-job <id>` must match the
+- Cross-harness resumes are rejected; `--resume-job <id|name>` must match the
   harness. Claude budgets can be capped with `--budget <usd>`.
+- PM lanes: `--name <card>-<slice>` names a job so status/result/cancel/
+  fix-round resumes can address it; `--lock-cmd`/`--unlock-cmd` bracket a
+  write job's worktree lock (acquired before the turn, released before the
+  terminal state is visible). Codex lanes add `--profile` and
+  `--no-user-config` for worktree profiles and MCP fencing.
 
 ## Adding a harness
 

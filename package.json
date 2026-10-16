@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Crush as master coordinator: delegate work to external agent harnesses (Droid, Claude Code) as managed background jobs.",
+  "description": "Crush as master coordinator: delegate work to external agent harnesses (Droid, Claude Code, Codex) as managed background jobs.",
   "engines": {
     "node": ">=20"
   },

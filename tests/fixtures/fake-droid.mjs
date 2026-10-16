@@ -10,6 +10,7 @@ const promptFile = argv[argv.indexOf("-f") + 1];
 const prompt = promptFile ? fs.readFileSync(promptFile, "utf8") : "";
 const hang = process.env.FAKE_HANG === "1";
 const invalidFirst = process.env.FAKE_DROID_INVALID_FIRST === "1";
+const zero = process.env.FAKE_DROID_ZERO === "1";
 const session = "fake-droid-session";
 
 function emit(lines) { for (const line of lines) console.log(JSON.stringify(line)); }
@@ -24,6 +25,15 @@ function resumeMessage() {
 }
 
 function run() {
+  if (zero) {
+    emit([
+      { jsonrpc: "2.0", result: { sessionId: session } },
+      { jsonrpc: "2.0", method: "droid.session_notification", params: { sessionId: session, notification: { type: "assistant_text_delta", messageId: "m0", blockIndex: 0, textDelta: "0" } } },
+      { jsonrpc: "2.0", method: "droid.session_notification", params: { sessionId: session, notification: { type: "assistant_text_complete", messageId: "m0" } } },
+      { jsonrpc: "2.0", method: "droid.session_notification", params: { sessionId: session, notification: { type: "agent_turn_completed", reason: "completed", tokenUsage: { input_tokens: 1, output_tokens: 1 } } } },
+    ]);
+    process.exit(0);
+  }
   if (outputFormat === "stream-jsonrpc") {
     emit([
       { jsonrpc: "2.0", result: { sessionId: session } },

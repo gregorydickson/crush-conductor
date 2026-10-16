@@ -23,7 +23,7 @@ test("droid fresh turn parses jsonrpc notifications into an envelope", async () 
     prompt: "do the thing",
     onProgress: message => events.push(message),
   });
-  assert.equal(turn.status, 0);
+  assert.equal(turn.exitCode, 0);
   assert.equal(turn.sessionId, "fake-droid-session");
   assert.equal(turn.finalMessage, "CONDUCTOR_OK");
   assert.deepEqual(turn.usage, { inputTokens: 10, outputTokens: 5, factoryCredits: 1 });
@@ -38,11 +38,27 @@ test("droid schema jobs validate and repair once", async () => {
       prompt: "structured thing",
       schema: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } },
     });
-    assert.equal(turn.status, 0);
+    assert.equal(turn.exitCode, 0);
     assert.equal(turn.schemaValid, true);
     assert.deepEqual(turn.parsed, { answer: "ok" });
   } finally {
     delete process.env.FAKE_DROID_INVALID_FIRST;
+  }
+});
+
+test("droid schema jobs accept falsy valid JSON", async () => {
+  process.env.FAKE_DROID_ZERO = "1";
+  try {
+    const turn = await droidAdapter.runTurn({
+      cwd: process.cwd(),
+      prompt: "answer zero",
+      schema: { type: "integer" },
+    });
+    assert.equal(turn.exitCode, 0);
+    assert.equal(turn.schemaValid, true);
+    assert.equal(turn.parsed, 0);
+  } finally {
+    delete process.env.FAKE_DROID_ZERO;
   }
 });
 
@@ -108,6 +124,38 @@ test("codex schema violations fail honestly", async () => {
   assert.equal(turn.exitCode, 1);
   assert.equal(turn.schemaValid, false);
   assert.match(turn.error.message, /schema validation/);
+});
+
+test("claude schema jobs are validated locally", async () => {
+  process.env.FAKE_CLAUDE_SCHEMA = "1";
+  try {
+    const turn = await claudeAdapter.runTurn({
+      cwd: process.cwd(),
+      prompt: "structured thing",
+      schema: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } },
+    });
+    assert.equal(turn.exitCode, 0);
+    assert.equal(turn.schemaValid, true);
+    assert.deepEqual(turn.parsed, { answer: "ok" });
+  } finally {
+    delete process.env.FAKE_CLAUDE_SCHEMA;
+  }
+});
+
+test("claude schema violations fail honestly", async () => {
+  process.env.FAKE_CLAUDE_SCHEMA_BAD = "1";
+  try {
+    const turn = await claudeAdapter.runTurn({
+      cwd: process.cwd(),
+      prompt: "structured thing",
+      schema: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } },
+    });
+    assert.equal(turn.exitCode, 1);
+    assert.equal(turn.schemaValid, false);
+    assert.match(turn.error.message, /schema validation/);
+  } finally {
+    delete process.env.FAKE_CLAUDE_SCHEMA_BAD;
+  }
 });
 
 test("codex turn failures fail the envelope", async () => {

@@ -23,14 +23,16 @@ conductor droid result --json
 
 ```
 conductor <droid|claude|codex> task [--background] [--write|--full-auto]
-                              [--resume | --resume-job <id> | --fresh]
+                              [--resume | --resume-job <id|name> | --fresh]
                               [--model <m>] [--effort <e>] [--cwd <dir>]
                               [--timeout <secs>] [--brief <file>]
                               [--instructions <file>] [--output-schema <file>]
-                              [--budget <usd>] [--json] [prompt]
-conductor <droid|claude|codex> status [job-id] [--wait] [--timeout <secs>] [--json]
-conductor <droid|claude|codex> result [job-id] [--json]
-conductor <droid|claude|codex> cancel [job-id] [--json]
+                              [--budget <usd>] [--name <name>]
+                              [--lock-cmd <cmd>] [--unlock-cmd <cmd>]
+                              [--profile <p>] [--no-user-config] [--json] [prompt]
+conductor <droid|claude|codex> status [job-id-or-name] [--wait] [--timeout <secs>] [--json]
+conductor <droid|claude|codex> result [job-id-or-name] [--json]
+conductor <droid|claude|codex> cancel [job-id-or-name] [--json]
 conductor <droid|claude|codex> doctor [--json]
 conductor <droid|claude|codex> resume-candidate [--json]
 conductor list [--harness <id>] [--json]
@@ -64,15 +66,17 @@ stdout; progress goes to the job's stream file, never stdout):
 }
 ```
 
-With `--output-schema`, `parsed` holds the worker's validated JSON and
-`schemaValid` states whether it matched. Droid enforces the schema via prompt +
-one repair turn; Claude Code and Codex enforce it natively (`--json-schema` /
-`--output-schema`).
+With `--output-schema`, `parsed` holds the worker's locally validated JSON
+and `schemaValid` states whether it matched — every harness adapter parses
+and validates the final message itself, so the claim is checked, never
+assumed. Droid additionally repairs one bad response; Claude Code and Codex
+lean on their native enforcement plus the same local check.
 
 State: `~/.local/share/crush-conductor/jobs/<job-id>/` (`job.json`,
-`stream.jsonl` progress trail, `cancel` marker). Override with
-`CONDUCTOR_DATA_DIR`. The last successful session per harness is remembered for
-`--resume`.
+`stream.jsonl` progress trail, `cancel` marker), written mode `0600`
+(operator-private: it holds prompts, results, session ids). Override with
+`CONDUCTOR_DATA_DIR`. The last successful session per harness is remembered
+for `--resume`.
 
 ## Access tiers
 
@@ -128,5 +132,5 @@ cancellation, resume, envelopes, and the Crush skill are harness-agnostic.
 
 ```bash
 npm test              # unit tests (fake harness binaries; no network, no tokens)
-npm run test:live     # real droid + claude smoke tasks; CONDUCTOR_LIVE=1 gates
+npm run test:live     # real claude, droid, and codex smoke tasks; CONDUCTOR_LIVE=1 gates
 ```

@@ -17,11 +17,13 @@ function conductor(dataRoot, args, extraEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: "utf8",
     timeout: 60000,
+    cwd: dataRoot,
     env: {
       ...process.env,
       CONDUCTOR_DATA_DIR: dataRoot,
       DROID_BINARY: path.join(ROOT, "tests", "fixtures", "fake-droid.mjs"),
       CLAUDE_BINARY: path.join(ROOT, "tests", "fixtures", "fake-claude.mjs"),
+      CODEX_BINARY: path.join(ROOT, "tests", "fixtures", "fake-codex.mjs"),
       ...extraEnv,
     },
   });
@@ -73,6 +75,72 @@ test("background task lifecycle through the CLI", async () => {
 
   const list = jsonOut(conductor(dataRoot, ["list", "--json"]));
   assert.ok(list.count >= 2);
+  const streamPathLaunched = path.join(dataRoot, "jobs", launched.jobId, "stream.jsonl");
+  const stream = fs.readFileSync(streamPathLaunched, "utf8");
+  assert.match(stream, /"type":"terminal","status":"completed"/, "progress trail ends with a terminal event");
+});
+
+test("codex runs the same background lifecycle", async () => {
+  const dataRoot = dataDir("codex");
+  const launch = conductor(dataRoot, ["codex", "task", "--background", "--json", "--name", "loa-2-s1", "quick check"]);
+  assert.equal(launch.status, 0, launch.stderr);
+  const launched = jsonOut(launch);
+  const waited = conductor(dataRoot, ["codex", "status", "loa-2-s1", "--wait", "--timeout", "30", "--json"]);
+  assert.equal(waited.status, 0, waited.stderr);
+  assert.equal(jsonOut(waited).status, "completed");
+  assert.equal(jsonOut(waited).result, "CONDUCTOR_OK");
+});
+
+test("numeric flags reject garbage instead of silently going NaN", () => {
+  const dataRoot = dataDir("nan");
+  assert.match(conductor(dataRoot, ["droid", "task", "--timeout", "90m", "--json", "x"]).stderr, /--timeout requires a number/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--budget", "5usd", "--json", "x"]).stderr, /--budget requires a number/);
+  assert.match(conductor(dataRoot, ["droid", "status", "--wait", "--timeout", "600s", "--json"]).stderr, /--timeout requires a number/);
+});
+
+test("--cwd must exist and --fresh conflicts with --resume", () => {
+  const dataRoot = dataDir("cwd");
+  assert.match(conductor(dataRoot, ["droid", "task", "--cwd", "/nonexistent/nowhere", "--json", "x"]).stderr, /--cwd is not an existing directory/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--fresh", "--resume", "--json", "x"]).stderr, /--fresh conflicts/);
+});
+
+test("relative --brief paths resolve at the CLI cwd, not --cwd", async () => {
+  const dataRoot = dataDir("brief");
+  fs.writeFileSync(path.join(dataRoot, "brief.md"), "the actual brief");
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "--brief", "brief.md"]);
+  assert.equal(launch.status, 0, launch.stderr);
+  const launched = jsonOut(launch);
+  assert.ok(path.isAbsolute(launched.briefFile), "brief path stored absolute");
+  assert.equal(fs.readFileSync(launched.briefFile, "utf8"), "the actual brief");
+  await waitForStatus(dataRoot, "droid", launched.jobId, ["completed", "failed"]);
+  assert.match(conductor(dataRoot, ["droid", "task", "--brief", "missing.md", "--json"]).stderr, /--brief file not found/);
+});
+
+test("cross-harness resume is rejected with the harness named", () => {
+  const dataRoot = dataDir("xresume");
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "x"]);
+  const droidId = jsonOut(launch).jobId;
+  const refused = conductor(dataRoot, ["claude", "task", "--json", "--resume-job", droidId, "y"]);
+  assert.match(refused.stderr, /it is a droid job, not claude/);
+});
+
+test("cancel force-settles a SIGKILLed supervisor and releases the lock", async () => {
+  const dataRoot = dataDir("force");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "conductor-force-"));
+  const unlockLog = path.join(scratch, "unlock.log");
+  const unlock = path.join(scratch, "unlock.sh");
+  fs.writeFileSync(unlock, `#!/bin/sh\necho unlocked >> ${unlockLog}\n`, { mode: 0o755 });
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "--unlock-cmd", unlock, "hang"], { FAKE_HANG: "1" });
+  const jobId = jsonOut(launch).jobId;
+  const running = await waitForStatus(dataRoot, "droid", jobId, ["running"], 10000);
+  process.kill(running.pid, "SIGKILL"); // supervisor dies hard mid-turn, lock held
+  const cancelled = conductor(dataRoot, ["droid", "cancel", jobId, "--json"]);
+  assert.equal(cancelled.status, 0, cancelled.stderr);
+  const settledState = jsonOut(cancelled).status;
+  assert.ok(["cancelled", "failed"].includes(settledState), `expected a settled state, got ${settledState}`);
+  assert.equal(fs.readFileSync(unlockLog, "utf8"), "unlocked\n", "the dead supervisor's lock was released");
+  const after = jsonOut(conductor(dataRoot, ["droid", "result", jobId, "--json"]));
+  assert.equal(after.status, settledState, "state is stable after settle");
 });
 
 test("cancel settles a hanging background job", async () => {

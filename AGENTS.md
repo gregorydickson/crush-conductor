@@ -12,8 +12,8 @@ repo that isn't locked to this session.
 
 # Project
 
-Crush is the master coordinator; Droid and Claude Code are worker harnesses
-driven through one uniform job CLI. Durability rule: job state lives on disk
+Crush is the master coordinator; Droid, Claude Code, and Codex are worker
+harnesses driven through one uniform job CLI. Durability rule: job state lives on disk
 under `CONDUCTOR_DATA_DIR` (default `~/.local/share/crush-conductor`), never in
 a session's memory — any process must be able to pick up a job by id and know
 its terminal state.
