@@ -1,0 +1,17 @@
+{
+  "name": "crush-conductor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Crush as master coordinator: delegate work to external agent harnesses (Droid, Claude Code) as managed background jobs.",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "conductor": "bin/conductor.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:live": "CONDUCTOR_LIVE=1 node --test tests/*.test.mjs"
+  }
+}
