@@ -132,27 +132,56 @@ test("--resume-session takes over a thread launched by any tool", async () => {
   assert.equal(first.sessionId, "fake-codex-thread");
 
   // Simulate a session recorded by ANOTHER tool (companion CLI, claude --bg):
-  // only the thread id is known to conductor, no job record exists.
+  // only the thread id is known to conductor, and it is deliberately distinct
+  // from any conductor-produced id so the echo proves argv identity end-to-end.
   const takeover = conductor(dataRoot, ["codex", "task", "--background", "--json", "--name", "loa-3-s1",
-    "--resume-session", "fake-codex-thread", "follow up"], { FAKE_CODEX_RESUME_SECRET: "1" });
+    "--resume-session", "external-thread-9", "follow up"], { FAKE_CODEX_RESUME_SECRET: "1" });
   assert.equal(takeover.status, 0, takeover.stderr);
   const second = await waitForStatus(dataRoot, "codex", jsonOut(takeover).jobId, ["completed", "failed"], 20000);
   assert.equal(second.status, "completed");
-  assert.equal(second.sessionId, "fake-codex-thread", "thread continuity preserved");
+  assert.equal(second.sessionId, "external-thread-9", "the sid from argv round-tripped — continuity proven by identity");
   assert.equal(second.result, "MANGO", "the child really ran in resume mode");
   assert.equal(second.resumedFrom, null, "no conductor job was resumed — this was an external thread");
   const byName = jsonOut(conductor(dataRoot, ["codex", "result", "loa-3-s1", "--json"]));
   assert.equal(byName.jobId, second.jobId, "the takeover now owns the card-slice name");
 
   const candidate = jsonOut(conductor(dataRoot, ["codex", "resume-candidate", "--json"]));
-  assert.equal(candidate.sessionId, "fake-codex-thread", "takeover updated the session index for later --resume");
+  assert.equal(candidate.jobId, second.jobId, "the takeover claimed the session index");
+  const chained = conductor(dataRoot, ["codex", "task", "--json", "--resume", "and again"]);
+  const third = await waitForStatus(dataRoot, "codex", jsonOut(chained).jobId, ["completed", "failed"], 20000);
+  assert.equal(third.resumedFrom, second.jobId, "later --resume continues the takeover, not the pre-takeover job");
+});
+
+test("a resume that mints a fresh thread id fails honestly", async () => {
+  const dataRoot = dataDir("takeover-fork");
+  // FAKE_CODEX_FORK_ON_UNKNOWN models real codex: an unknown sid silently
+  // starts a fresh thread under a NEW id instead of erroring.
+  const takeover = conductor(dataRoot, ["codex", "task", "--background", "--json",
+    "--resume-session", "not-a-known-thread", "x"], { FAKE_CODEX_FORK_ON_UNKNOWN: "1" });
+  const forked = await waitForStatus(dataRoot, "codex", jsonOut(takeover).jobId, ["completed", "failed"], 20000);
+  assert.equal(forked.status, "failed");
+  assert.match(forked.error.message, /started a fresh thread \(forked-not-a-known-thread\) instead of continuing not-a-known-thread/);
+  const candidate = jsonOut(conductor(dataRoot, ["codex", "resume-candidate", "--json"]));
+  assert.equal(candidate.available, false, "the impostor thread never claims the session index");
 });
 
 test("--resume-session conflicts and shape errors", () => {
   const dataRoot = dataDir("takeover-err");
   assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "s1", "--resume", "x"]).stderr, /mutually exclusive/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "s1", "--resume-job", "other", "x"]).stderr, /mutually exclusive/);
   assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "s1", "--fresh", "x"]).stderr, /--fresh conflicts/);
-  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "has space", "x"]).stderr, /no whitespace/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "has space", "x"]).stderr, /requires a session\/thread id/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "--last", "x"]).stderr, /requires a session\/thread id/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--resume-session", "-x", "x"]).stderr, /requires a session\/thread id/);
+});
+
+test("--name bound to a live job is rejected", () => {
+  const dataRoot = dataDir("name-clash");
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "--name", "loa-9-s1", "x"], { FAKE_HANG: "1" });
+  assert.equal(launch.status, 0, launch.stderr);
+  const clash = conductor(dataRoot, ["droid", "task", "--background", "--json", "--name", "loa-9-s1", "y"]);
+  assert.match(clash.stderr, /already bound to/);
+  conductor(dataRoot, ["droid", "cancel", "loa-9-s1", "--json"]);
 });
 
 test("cancel force-settles a SIGKILLed supervisor and releases the lock", async () => {
@@ -172,6 +201,22 @@ test("cancel force-settles a SIGKILLed supervisor and releases the lock", async 
   assert.equal(fs.readFileSync(unlockLog, "utf8"), "unlocked\n", "the dead supervisor's lock was released");
   const after = jsonOut(conductor(dataRoot, ["droid", "result", jobId, "--json"]));
   assert.equal(after.status, settledState, "state is stable after settle");
+});
+
+test("a failing unlock on the forced-cancel path is recorded as a warning", async () => {
+  const dataRoot = dataDir("force-badlock");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "conductor-forcebad-"));
+  const badUnlock = path.join(scratch, "unlock.sh");
+  fs.writeFileSync(badUnlock, "#!/bin/sh\nexit 7\n", { mode: 0o755 });
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "--unlock-cmd", badUnlock, "hang"], { FAKE_HANG: "1" });
+  const jobId = jsonOut(launch).jobId;
+  const running = await waitForStatus(dataRoot, "droid", jobId, ["running"], 10000);
+  process.kill(running.pid, "SIGKILL");
+  const cancelled = conductor(dataRoot, ["droid", "cancel", jobId, "--json"]);
+  assert.equal(cancelled.status, 0, cancelled.stderr);
+  const record = jsonOut(conductor(dataRoot, ["droid", "result", jobId, "--json"]));
+  assert.ok(["cancelled", "failed"].includes(record.status));
+  assert.ok((record.warnings ?? []).some(w => /unlock command failed \(7\)/i.test(w.message)), `unlock failure is a job warning: ${JSON.stringify(record.warnings)}`);
 });
 
 test("cancel settles a hanging background job", async () => {

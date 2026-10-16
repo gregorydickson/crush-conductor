@@ -8,11 +8,15 @@ if (argv.includes("--version")) { console.log("fake-codex 0.0.0"); process.exit(
 const outputIndex = argv.indexOf("-o");
 const lastMessageFile = outputIndex !== -1 ? argv[outputIndex + 1] : null;
 const isResume = argv[argv.indexOf("exec") + 1] === "resume";
+// Echo the sid the adapter passed so tests can prove id identity end-to-end;
+// FAKE_CODEX_FORK_ON_UNKNOWN models real codex's silent-fresh on unknown ids.
+const requestedSid = isResume ? argv[argv.indexOf("exec") + 2] : null;
+const known = requestedSid != null && (requestedSid.startsWith("fake-") || requestedSid.startsWith("external-"));
+const threadId = isResume && process.env.FAKE_CODEX_FORK_ON_UNKNOWN === "1" && !known ? `forked-${requestedSid}` : requestedSid ?? "fake-codex-thread";
 
 let prompt = "";
 process.stdin.on("data", data => { prompt += data; });
 process.stdin.on("end", () => {
-  const threadId = "fake-codex-thread";
   const fail = process.env.FAKE_CODEX_ERROR === "1";
   const hang = process.env.FAKE_HANG === "1";
   const run = () => {

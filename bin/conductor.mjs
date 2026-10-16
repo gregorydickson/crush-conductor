@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { parseArgs } from "../lib/args.mjs";
 import { getAdapter, listAdapters } from "../lib/adapters/registry.mjs";
-import { superviseJob } from "../lib/supervise.mjs";
+import { superviseJob, releaseLock } from "../lib/supervise.mjs";
 import {
   assertJobId, createJob, envelope, dataRoot, getLastSession, isTerminal,
   listJobs, newJobId, readJob, recoverIfStale, requestCancel, resolveJobId, updateJob,
@@ -21,7 +21,7 @@ const HARNESS_FLAGS = {
       "--full-auto": { key: "fullAuto", type: "bool" },
       "--resume": { key: "resume", type: "bool" },
       "--resume-job": { key: "resumeJobId", type: "string" },
-      "--resume-session": { key: "resumeSession", type: "string" },
+      "--resume-session": { key: "resumeSessionId", type: "string" },
       "--fresh": { key: "fresh", type: "bool" },
       "--model": { key: "model", type: "string" },
       "--effort": { key: "effort", type: "string" },
@@ -111,15 +111,20 @@ async function cmdTask(harness, flags, positional) {
   const outputSchemaFile = flags.outputSchemaFile ? existingFile(flags.outputSchemaFile, "--output-schema") : null;
   const outputSchema = outputSchemaFile ? readJsonFile(outputSchemaFile, "output schema") : null;
   if (flags.name) assertJobId(flags.name, "--name value");
-  if (flags.fresh && (flags.resume || flags.resumeJobId || flags.resumeSession)) {
+  if (flags.fresh && (flags.resume || flags.resumeJobId || flags.resumeSessionId)) {
     throw new Error("--fresh conflicts with --resume/--resume-job/--resume-session: pick one.");
   }
-  const resumeFlags = [flags.resume, flags.resumeJobId, flags.resumeSession].filter(Boolean).length;
+  const resumeFlags = [flags.resume, flags.resumeJobId, flags.resumeSessionId].filter(Boolean).length;
   if (resumeFlags > 1) {
     throw new Error("--resume, --resume-job and --resume-session are mutually exclusive.");
   }
-  if (flags.resumeSession != null && !/^\S+$/.test(flags.resumeSession)) {
-    throw new Error("--resume-session requires a session/thread id with no whitespace.");
+  if (flags.resumeSessionId != null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(flags.resumeSessionId)) {
+    throw new Error("--resume-session requires a session/thread id: alphanumerics, dots, underscores, hyphens, no leading hyphen (got " + JSON.stringify(String(flags.resumeSessionId).slice(0, 40)) + ").");
+  }
+  if (flags.name) {
+    assertJobId(flags.name, "--name value");
+    const clash = listJobs({ harness }).find(job => job.name === flags.name && !isTerminal(job));
+    if (clash) throw new Error(`--name ${flags.name} is already bound to ${clash.jobId} (${clash.status}); status/result/cancel by that name would reach the wrong job.`);
   }
   const timeoutSec = flags.timeoutSec ? numericFlag(flags.timeoutSec, "--timeout") : 3600;
   const budgetUsd = flags.budgetUsd ? numericFlag(flags.budgetUsd, "--budget") : null;
@@ -129,12 +134,9 @@ async function cmdTask(harness, flags, positional) {
   }
 
   let resumeOf = null;
-  if (flags.resumeSession) {
-    // Mid-flight takeover: continue a harness thread launched by any tool
-    // (companion CLI, claude --bg, another operator session). The id is not
-    // validated against a conductor record — the harness itself rejects an
-    // unknown thread and the failure surfaces in the job envelope.
-  } else if (flags.resumeJobId) {
+  // Takeover ids skip conductor's job records: the harness is given the raw
+  // thread id and continuity is verified after the turn.
+  if (flags.resumeJobId) {
     const prior = readJob(resolveJobId(flags.resumeJobId, harness));
     if (prior.harness !== harness) throw new Error(`Cannot resume ${flags.resumeJobId}: it is a ${prior.harness} job, not ${harness}.`);
     if (!prior.sessionId) throw new Error(`Cannot resume ${prior.jobId}: it recorded no session ID.`);
@@ -173,7 +175,7 @@ async function cmdTask(harness, flags, positional) {
     cwd,
     timeoutSec,
     resumeOf,
-    resumeSession: flags.resumeSession ?? null,
+    resumeSessionId: flags.resumeSessionId ?? null,
   });
 
   if (flags.background) {
@@ -279,11 +281,8 @@ async function cmdCancel(harness, id, flags) {
   }
   terminateProcessTree(job.childPid, { identity: job.childPidIdentity ?? null });
   terminateProcessTree(job.pid, { identity: job.pidIdentity ?? null });
-  let unlockWarnings = [];
-  if (job.unlockCmd) {
-    const unlocked = runCommand("/bin/sh", ["-c", job.unlockCmd], { cwd: job.cwd });
-    if (unlocked.status !== 0) unlockWarnings = [{ message: `Unlock command failed (${unlocked.status}): ${(unlocked.stderr || unlocked.stdout).slice(0, 300)}` }];
-  }
+  job = readJob(jobId); // fresh snapshot: the dying supervisor may have written warnings we must keep
+  const unlockWarnings = releaseLock(job);
   job = updateJob(jobId, {
     status: "cancelled",
     endedAt: new Date().toISOString(),
