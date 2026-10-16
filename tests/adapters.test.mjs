@@ -89,3 +89,9 @@ test("codex write resume expresses the sandbox as a config override", () => {
   assert.ok(args.includes('sandbox_mode="workspace-write"'));
   assert.ok(args.includes('approval_policy="never"'));
 });
+
+test("codex profile and no-user-config fence pass through", () => {
+  const args = codexAdapter.buildExecArgs({ cwd: "/w", profile: "edu-worktree", noUserConfig: true, lastMessageFile: "/o" });
+  assert.equal(args[args.indexOf("-p") + 1], "edu-worktree");
+  assert.ok(args.includes("--ignore-user-config"));
+});

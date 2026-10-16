@@ -105,4 +105,42 @@ test("unknown harness and missing prompt are errors", () => {
   const dataRoot = dataDir("errors");
   assert.match(conductor(dataRoot, ["grok", "task", "--json", "x"]).stderr, /Unknown harness/);
   assert.match(conductor(dataRoot, ["droid", "task", "--json"]).stderr, /prompt or --brief/);
+  assert.match(conductor(dataRoot, ["droid", "task", "--json", "--profile", "p", "x"]).stderr, /codex-only/);
+});
+
+test("lock and unlock commands bracket a named job", async () => {
+  const dataRoot = dataDir("locks");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "conductor-locks-"));
+  const lockLog = path.join(scratch, "lock.log");
+  const lock = path.join(scratch, "lock.sh");
+  const unlock = path.join(scratch, "unlock.sh");
+  fs.writeFileSync(lock, `#!/bin/sh\necho locked >> ${lockLog}\n`, { mode: 0o755 });
+  fs.writeFileSync(unlock, `#!/bin/sh\necho unlocked >> ${lockLog}\n`, { mode: 0o755 });
+
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "--name", "loa-1-s1",
+    "--lock-cmd", lock, "--unlock-cmd", unlock, "quick check"]);
+  assert.equal(launch.status, 0, launch.stderr);
+  const done = await waitForStatus(dataRoot, "droid", jsonOut(launch).jobId, ["completed", "failed"], 20000);
+  assert.equal(done.status, "completed");
+  assert.equal(done.name, "loa-1-s1");
+  assert.equal(fs.readFileSync(lockLog, "utf8"), "locked\nunlocked\n", "lock before, unlock after, exactly once");
+
+  const byName = jsonOut(conductor(dataRoot, ["droid", "result", "loa-1-s1", "--json"]));
+  assert.equal(byName.jobId, done.jobId, "result resolves by name");
+});
+
+test("a failing lock command fails the job without unlocking", async () => {
+  const dataRoot = dataDir("badlock");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "conductor-badlock-"));
+  const lockLog = path.join(scratch, "lock.log");
+  const badLock = path.join(scratch, "bad-lock.sh");
+  const unlock = path.join(scratch, "unlock.sh");
+  fs.writeFileSync(badLock, `#!/bin/sh\necho lock-attempt >> ${lockLog}\nexit 3\n`, { mode: 0o755 });
+  fs.writeFileSync(unlock, `#!/bin/sh\necho unlocked >> ${lockLog}\n`, { mode: 0o755 });
+
+  const launch = conductor(dataRoot, ["droid", "task", "--background", "--json", "--lock-cmd", badLock, "--unlock-cmd", unlock, "quick check"]);
+  const done = await waitForStatus(dataRoot, "droid", jsonOut(launch).jobId, ["completed", "failed"], 20000);
+  assert.equal(done.status, "failed");
+  assert.match(done.error.message, /Lock command failed/);
+  assert.equal(fs.readFileSync(lockLog, "utf8"), "lock-attempt\n", "unlock never ran");
 });

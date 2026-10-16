@@ -31,6 +31,11 @@ const HARNESS_FLAGS = {
       "--instructions": { key: "instructionsFile", type: "string" },
       "--output-schema": { key: "outputSchemaFile", type: "string" },
       "--budget": { key: "budgetUsd", type: "string" },
+      "--name": { key: "name", type: "string" },
+      "--lock-cmd": { key: "lockCmd", type: "string" },
+      "--unlock-cmd": { key: "unlockCmd", type: "string" },
+      "--profile": { key: "profile", type: "string" },
+      "--no-user-config": { key: "noUserConfig", type: "bool" },
       "--json": { key: "json", type: "bool" },
     },
   },
@@ -48,10 +53,11 @@ const HARNESS_FLAGS = {
 function usage() {
   const harnesses = listAdapters().map(adapter => adapter.id).join("|");
   return `Usage:
-  conductor <${harnesses}> task [--background|--wait] [--write|--full-auto] [--resume|--resume-job <id>|--fresh]
+  conductor <${harnesses}> task [--background|--wait] [--write|--full-auto] [--resume|--resume-job <id|name>|--fresh]
                                 [--model <m>] [--effort <e>] [--cwd <dir>] [--timeout <secs>]
                                 [--brief <file>] [--instructions <file>] [--output-schema <file>]
-                                [--budget <usd>] [--json] [prompt]
+                                [--budget <usd>] [--name <name>] [--lock-cmd <cmd>] [--unlock-cmd <cmd>]
+                                [--profile <p>] [--no-user-config] [--json] [prompt]
   conductor <${harnesses}> status [job-id] [--wait] [--timeout <secs>] [--json]
   conductor <${harnesses}> result [job-id] [--json]
   conductor <${harnesses}> cancel [job-id] [--json]
@@ -92,10 +98,10 @@ async function cmdTask(harness, flags, positional) {
 
   let resumeOf = null;
   if (flags.resumeJobId) {
-    const prior = readJob(flags.resumeJobId);
+    const prior = readJob(resolveJobId(flags.resumeJobId, harness));
     if (prior.harness !== harness) throw new Error(`Cannot resume ${flags.resumeJobId}: it is a ${prior.harness} job, not ${harness}.`);
-    if (!prior.sessionId) throw new Error(`Cannot resume ${flags.resumeJobId}: it recorded no session ID.`);
-    resumeOf = flags.resumeJobId;
+    if (!prior.sessionId) throw new Error(`Cannot resume ${prior.jobId}: it recorded no session ID.`);
+    resumeOf = prior.jobId;
   } else if (flags.resume) {
     const last = getLastSession(harness) ?? listJobs({ harness }).find(job => job.status === "completed" && job.sessionId);
     if (!last) throw new Error(`No resumable ${harness} session on record. Start fresh (omit --resume).`);
@@ -105,6 +111,9 @@ async function cmdTask(harness, flags, positional) {
   const availability = adapter.availability();
   if (!availability.available) {
     throw new Error(`${adapter.label} binary is not available (${availability.detail ?? "not on PATH"}). Run: conductor ${harness} doctor`);
+  }
+  if ((flags.profile || flags.noUserConfig) && harness !== "codex") {
+    throw new Error(`--profile and --no-user-config are codex-only (got ${harness}).`);
   }
 
   const job = createJob({
@@ -119,6 +128,11 @@ async function cmdTask(harness, flags, positional) {
     write: Boolean(flags.write),
     fullAuto: Boolean(flags.fullAuto),
     budgetUsd: flags.budgetUsd ? Number(flags.budgetUsd) : null,
+    name: flags.name ?? null,
+    lockCmd: flags.lockCmd ?? null,
+    unlockCmd: flags.unlockCmd ?? null,
+    profile: flags.profile ?? null,
+    noUserConfig: Boolean(flags.noUserConfig),
     cwd: flags.cwd ? path.resolve(flags.cwd) : process.cwd(),
     timeoutSec: flags.timeoutSec ? Number(flags.timeoutSec) : 3600,
     resumeOf,

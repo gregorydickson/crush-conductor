@@ -52,12 +52,24 @@ test("a running job with a live supervisor is left alone", () => {
   assert.equal(jobs.recoverIfStale(jobs.readJob(job.jobId)).status, "running");
 });
 
-test("prune keeps a bounded number of terminal jobs", () => {
+test("jobs resolve by name when no id matches", () => {
+  jobs.createJob({ jobId: "claude-n1", harness: "claude", prompt: "a", createdAt: "2026-01-03T00:00:01Z", name: "edu-12-s2" });
+  jobs.createJob({ jobId: "claude-n2", harness: "claude", prompt: "b", createdAt: "2026-01-04T00:00:01Z", name: "edu-12-s2" });
+  assert.equal(jobs.resolveJobId("edu-12-s2", "claude"), "claude-n2", "latest job with that name wins");
+  assert.equal(jobs.resolveJobId("claude-n1", "claude"), "claude-n1", "exact id still wins");
+});
+
+test("prune keeps exactly the N newest terminal jobs across harnesses", () => {
   for (let i = 0; i < 8; i++) {
-    const job = jobs.createJob({ jobId: `claude-p${i}`, harness: "claude", prompt: "x", createdAt: new Date(2026, 0, 1, 0, 0, i + 10).toISOString() });
+    const job = jobs.createJob({ jobId: `claude-p${i}`, harness: "claude", prompt: "x", createdAt: new Date(2026, 0, 2, 0, 0, i + 10).toISOString() });
     jobs.updateJob(job.jobId, { status: "completed" });
   }
-  const removed = jobs.pruneJobs(4);
-  assert.ok(removed >= 4);
-  assert.ok(jobs.listJobs({ harness: "claude" }).length <= 4 + 2); // + non-terminal leftovers
+  const terminalBefore = jobs.listJobs().filter(j => ["completed", "failed", "cancelled"].includes(j.status));
+  const keep = 4;
+  const expectedKept = new Set(terminalBefore.slice(0, keep).map(j => j.jobId));
+  const expectedGone = new Set(terminalBefore.slice(keep).map(j => j.jobId));
+  jobs.pruneJobs(keep);
+  const idsAfter = new Set(jobs.listJobs().map(j => j.jobId));
+  for (const id of expectedKept) assert.ok(idsAfter.has(id), `newest terminal job ${id} survives`);
+  for (const id of expectedGone) assert.ok(!idsAfter.has(id), `older terminal job ${id} is pruned`);
 });
